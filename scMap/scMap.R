@@ -26,7 +26,7 @@ isSpike(test_ndata_sce, "ERCC") <- grepl("^ERCC-", rownames(test_ndata_sce))
 test_ndata_sce <- test_ndata_sce[!duplicated(rownames(test_ndata_sce)), ]
 test_ndata_sce <- selectFeatures(test_ndata_sce, suppress_plot = FALSE)
 
-# Annotating
+# Annotating cell-based
 ref_ndata_sce <- indexCell(ref_ndata_sce)
 scmapCell_results <- scmapCell(
   test_ndata_sce, 
@@ -40,4 +40,15 @@ scmapCell_clusters <- scmapCell2Cluster(
     as.character(colData(ref_ndata_sce)$cell_type1)
   )
 )
-celltype$scmap<- scmapCell_clusters$scmap_cluster_labs
+celltype$scmap_cell<- scmapCell_clusters$scmap_cluster_labs
+
+
+# Annotating cluster-based
+ref_ndata_sce <- indexCluster(ref_ndata_sce)
+scmapCluster_results <- scmapCluster(
+  test_ndata_sce, 
+  list(
+    scmap = metadata(ref_ndata_sce)$scmap_cluster_index
+  )
+)
+celltype$scmap_cluster<- scmapCluster_results$scmap_cluster_labs
