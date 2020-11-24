@@ -88,7 +88,9 @@ scPredict_debug <- function(object, newData = NULL, threshold = 0.9,
   res_nrow1<- which(res_nrow != nrow(projection))
   # Gather results in a dataframe
   res <- as.data.frame(res)
-  res <- res[,-res_nrow1]
+  if (length(res_nrow1) > 0) {
+    res <- res[,-res_nrow1]
+  }
   row.names(res) <- rownames(projection)
   if(length(classes) == 1){
     # If only one model was trained (positive and negative classes present in prediction
