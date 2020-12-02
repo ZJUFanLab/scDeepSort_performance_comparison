@@ -7,6 +7,155 @@ library(methods)
 # ref_ndata represents the normolized dgCMatrix object using Seurat from HCL or MCA. Each row represents a gene (gene symbol) and each column represents a cell (cell barcode).  
 # ref_celltype represents the data.frame object containg two columns, namely cell barcode and cell type.
 
+getFeatureSpace_debug <- function(object, pVar, varLim = 0.01, correction = "fdr", sig = 0.05){
+  
+  
+  # Validations -------------------------------------------------------------
+  
+  if(!is(object, "scPred") & !is(object, "Seurat")){
+    stop("Invalid class for object: must be 'scPred' or 'Seurat'")
+  }
+  
+  if(!any(correction %in% stats::p.adjust.methods)){
+    stop("Invalid multiple testing correction method. See ?p.adjust function")
+  }
+  
+  if(is(object, "scPred")){
+    classes <- metadata(object)[[pVar]]
+  }else{
+    classes <- object[[pVar, drop = TRUE]]
+  }
+  
+  if(is.null(classes)){
+    stop("Prediction variable is not stored in metadata slot")
+  }
+  
+  if(!is.factor(classes)){
+    message("Transforming prediction variable to factor object...")
+    classes <- as.factor(classes)
+  }
+  
+  # Filter principal components by variance ---------------------------------
+  
+  if(is(object, "scPred")){ # scPred object
+    
+    # Get PCA
+    i <- object@expVar > varLim
+    pca <- getPCA(object)[,i]
+    
+    # Get variance explained
+    expVar <- object@expVar
+    
+  }else{ # seurat object
+    
+    # Check if a PCA has been computed
+    if(!("pca" %in% names(object@reductions))){
+      stop("No PCA has been computet yet. See RunPCA() function")
+    }
+    
+    # Check if available was normalized
+    
+    assay <- DefaultAssay(object)
+    cellEmbeddings <- Embeddings(object)
+    
+    
+    # Subset PCA
+    expVar <- Stdev(object)**2/sum(Stdev(object)**2)
+    names(expVar) <- colnames(Embeddings(object))
+    i <-  expVar > varLim
+    
+    # Create scPred object
+    pca <- Embeddings(object)[,i]
+    
+  }
+  
+  uniqueClasses <- unique(classes)
+  isValidName <- uniqueClasses == make.names(uniqueClasses)
+  
+  if(!all(isValidName)){
+    
+    invalidClasses <- paste0(uniqueClasses[!isValidName], collapse = "\n")
+    message("Not all the classes are valid R variable names\n")
+    message("The following classes are renamed: \n", invalidClasses)
+    classes <- make.names(classes)
+    classes <- factor(classes, levels = unique(classes))
+    newPvar <- paste0(pVar, ".valid")
+    if(is(object, "scPred")){
+      object@metadata[[newPvar]] <- classes
+    }else{
+      object@meta.data[[newPvar]] <- classes
+    }
+    message("\nSee new classes in '", pVar, ".valid' column in metadata:")
+    message(paste0(levels(classes)[!isValidName], collapse = "\n"), "\n")
+    pVar <- newPvar
+  }
+  
+  
+  
+  
+  # Select informative principal components
+  # If only 2 classes are present in prediction variable, train one model for the positive class
+  # The positive class will be the first level of the factor variable
+  
+  if(length(levels(classes)) == 2){
+    
+    message("First factor level in '", pVar, "' metadata column considered as positive class")
+    res <- .getFeatures(levels(classes)[1], expVar, classes, pca, correction, sig)
+    res <- list(res)
+    names(res) <- levels(classes)[1]
+    
+  }else{
+    
+    res <- pblapply(levels(classes), .getFeatures, expVar, classes, pca, correction, sig)
+    names(res) <- levels(classes)
+    
+  }
+  
+  
+  nFeatures <- unlist(lapply(res, nrow))
+  
+  noFeatures <- nFeatures == 0
+  
+  if(any(noFeatures)){
+    
+    warning("\nWarning: No features were found for classes:\n",
+            paste0(names(res)[noFeatures], collapse = "\n"), "\n")
+    
+    res1<- list()
+    for (j in 1:length(res)) {
+      d1<- res[[j]]
+      if (nrow(d1) > 0) {
+        res1[names(res)[j]]<- res[j]
+      }
+    }
+    res<- res1
+  }
+  
+  message("\nDONE!")
+  
+  
+  # Assign feature space to `features` slot
+  if(inherits(object, "Seurat")){
+    
+    # Create scPred object
+    scPredObject <- list(expVar = expVar,
+                         features = res,
+                         pVar = pVar,
+                         pseudo = FALSE)
+    
+    object@misc <- list(scPred = scPredObject)
+    
+  }else{
+    
+    
+    object@features <- res
+    object@pVar <- pVar
+  }
+  
+  object
+  
+}
+
 scPredict_debug <- function(object, newData = NULL, threshold = 0.9, 
                             returnProj = TRUE, returnData = FALSE, informative = TRUE,
                             useProj = FALSE){
@@ -144,7 +293,7 @@ scPredict_debug <- function(object, newData = NULL, threshold = 0.9,
 scp <- eigenDecompose(as.matrix(ref_ndata),pseudo = F)
 metadata(scp) <- ref_celltype
 # Feature selection
-scp <- getFeatureSpace(scp, pVar = "celltype")
+scp <- getFeatureSpace_debug(scp, pVar = "celltype")
 # Model training
 scp <- trainModel(scp)
 # Prediction step
